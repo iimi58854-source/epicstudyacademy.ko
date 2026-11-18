@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Epic Study Academy</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel for in-browser JSX parsing -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+        
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f1f5f9; margin: 0; overflow: hidden; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+        ::-webkit-scrollbar { display: none; }
+        
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes openGateLeft { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+        @keyframes openGateRight { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes glowText { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Local Storage Custom Hook ---
+        function useLocalStorage(key, initialValue) {
+            const [storedValue, setStoredValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) { return initialValue; }
+            });
+            const setValue = (value) => {
+                try {
+                    const valueToStore = value instanceof Function ? value(storedValue) : value;
+                    setStoredValue(valueToStore);
+                    window.localStorage.setItem(key, JSON.stringify(valueToStore));
+                } catch (error) { console.error(error); }
+            };
+            return [storedValue, setValue];
+        }
+
+        // --- Static Game Data ---
+        const SUBJECTS = ["수학", "영어", "국어", "통합사회", "통합과학"];
+        const CHARACTERS = [
+            { id: 'c_n1', name: '견습 마법사 렌', rarity: 'N', atkMult: 1.0, expMult: 1.0, color: 'text-slate-400' },
+            { id: 'c_r1', name: '정령술사 아리아', rarity: 'R', atkMult: 1.1, expMult: 1.1, color: 'text-emerald-500' },
+            { id: 'c_sr1', name: '마검사 실비아', rarity: 'SR', atkMult: 1.4, expMult: 1.2, color: 'text-purple-500' },
+            { id: 'c_ssr1', name: '제국 1황녀 클로에', rarity: 'SSR', atkMult: 1.8, expMult: 1.6, color: 'text-pink-500' },
+            { id: 'c_ur1', name: '아카데미 총장 앨리스', rarity: 'UR', atkMult: 2.5, expMult: 2.5, color: 'text-amber-500' },
+        ];
+        const SHOP_ITEMS = [
+            { id: 'w1', name: '초심자의 깃펜', type: 'weapon', bonus: 20, expBonus: 0, price: 300, icon: '🖋️', desc: 'ATK +20' },
+            { id: 'w2', name: '진리의 만년필', type: 'weapon', bonus: 80, expBonus: 0, price: 1000, icon: '✒️', desc: 'ATK +80' },
+            { id: 'a1', name: '집중의 후드티', type: 'armor', bonus: 0, expBonus: 0.1, price: 500, icon: '🧥', desc: 'EXP +10%' },
+            { id: 'a2', name: '왕립 수석 교복', type: 'armor', bonus: 0, expBonus: 0.3, price: 1500, icon: '👔', desc: 'EXP +30%' },
+        ];
+
+        function EpicStudyAcademy() {
+            // --- Local Data State (Clean Slate) ---
+            const [player, setPlayer] = useLocalStorage('esa_player_html', {
+                uid: 'user_' + Math.random().toString(36).substring(2, 9),
+                isJoined: false, profilePic: null, nickname: '', grades: { 수학: 5, 영어: 5, 국어: 5, 통합사회: 5, 통합과학: 5 },
+                rank: 5, position: '정시', level: 1, exp: 0, gold: 1500, baseAtk: 100,
+                friendCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
+                equippedCharId: 'c_n1', inventoryChar: ['c_n1'], inventoryGear: [], equippedGearIds: [],
+                guildId: null, dailyRecords: {}
+            });
+            const [quests, setQuests] = useLocalStorage('esa_quests_html', []);
+            const [monster, setMonster] = useLocalStorage('esa_monster_html', { level: 1, hp: 1000, maxHp: 1000 });
+            const [friends, setFriends] = useLocalStorage('esa_friends_html', []);
+            
+            const [allUsers, setAllUsers] = useLocalStorage('esa_allUsers_html', []);
+            const [allGuilds, setAllGuilds] = useLocalStorage('esa_allGuilds_html', []);
+
+            // Sync current player to allUsers
+            useEffect(() => {
+                if (player.isJoined) {
+                    setAllUsers(prev => {
+                        const exists = prev.find(p => p.uid === player.uid);
+                        if (exists) return prev.map(p => p.uid === player.uid ? player : p);
+                        return [...prev, player];
+                    });
+                }
+            }, [player, player.isJoined]);
+
+            // --- UI State ---
+            const [showLoader, setShowLoader] = useState(true);
+            const [fadeOutLoader, setFadeOutLoader] = useState(false);
+
+            const [activeTab, setActiveTab] = useState('status'); 
+            const [questTab, setQuestTab] = useState('concept'); 
+            const [rankTab, setRankTab] = useState('user'); 
+            const [toast, setToast] = useState(null);
+            const [damageText, setDamageText] = useState(null);
+            
+            const [cQuest, setCQuest] = useState({ subject: '수학', chapter: '', time: '' });
+            const [pQuest, setPQuest] = useState({ subject: '수학', workbook: '', qCount: '' });
+            const [friendInput, setFriendInput] = useState('');
+            const [guildNameInput, setGuildNameInput] = useState('');
+            
+            const [gachaModal, setGachaModal] = useState(null);
+            const [duelModal, setDuelModal] = useState(null);
+
+            const [timerState, setTimerState] = useState({ active: false, seconds: 0 });
+            const timerRef = useRef(null);
+
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            // --- Loading Animation ---
+            useEffect(() => {
+                const fadeTimer = setTimeout(() => setFadeOutLoader(true), 2500);
+                const removeTimer = setTimeout(() => setShowLoader(false), 3000);
+                return () => { clearTimeout(fadeTimer); clearTimeout(removeTimer); };
+            }, []);
+
+            useEffect(() => { return () => clearInterval(timerRef.current); }, []);
+
+            // --- Utilities ---
+            const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+            const getReqExp = (level) => level * 500;
+            const getEquippedChar = () => CHARACTERS.find(c => c.id === player.equippedCharId) || CHARACTERS[0];
+            const getGearStats = () => {
+                let atkBonus = 0; let expBonus = 0;
+                player.equippedGearIds.forEach(id => {
+                    const item = SHOP_ITEMS.find(i => i.id === id);
+                    if (item?.bonus) atkBonus += item.bonus;
+                    if (item?.expBonus) expBonus += item.expBonus;
+                });
+                return { atkBonus, expBonus };
+            };
+            const getTotalAtk = () => {
+                const charMult = getEquippedChar().atkMult;
+                const levelBonus = 1 + ((player.level - 1) * 0.05);
+                return Math.floor((player.baseAtk + getGearStats().atkBonus) * charMult * levelBonus);
+            };
+            const calcRank = (grades) => {
+                const avg = Object.values(grades).reduce((a,b) => a + Number(b), 0) / 5;
+                return Math.max(1, Math.min(9, Math.round(avg)));
+            };
+
+            // --- Game Logic ---
+            const gainRewards = (expAmount, goldAmount) => {
+                const finalExp = Math.floor(expAmount * getEquippedChar().expMult * (1 + getGearStats().expBonus) * (player.position === '수시' ? 1.1 : 1.0));
+                let newP = { ...player, gold: player.gold + goldAmount };
+                newP.exp += finalExp;
+                let reqExp = getReqExp(newP.level);
+                let leveledUp = false;
+                
+                while (newP.exp >= reqExp) {
+                    newP.exp -= reqExp; newP.level += 1; newP.baseAtk += 20;
+                    reqExp = getReqExp(newP.level); leveledUp = true;
+                }
+                setPlayer(newP);
+                if (leveledUp) setTimeout(() => alert(`🎉 레벨 업! 현재 레벨: ${newP.level}`), 500);
+                return finalExp;
+            };
+
+            const dealDamage = (dmg) => {
+                setDamageText(dmg);
+                setTimeout(() => setDamageText(null), 1000);
+                let newHp = monster.hp - dmg;
+                if (newHp <= 0) {
+                    const clearGold = monster.level * 300;
+                    setPlayer(p => ({ ...p, gold: p.gold + clearGold }));
+                    setMonster({ level: monster.level + 1, maxHp: (monster.level + 1) * 1200, hp: (monster.level + 1) * 1200 });
+                    showToast(`🏆 몬스터 토벌! 보상 ${clearGold}G 획득!`);
+                } else {
+                    setMonster({ ...monster, hp: newHp });
+                    showToast(`몬스터에게 ${dmg}의 치명타!`);
+                }
+            };
+
+            const handleJoin = (e) => {
+                e.preventDefault();
+                if (!player.nickname.trim()) return showToast("이름을 입력해주세요.");
+                setPlayer({ ...player, isJoined: true });
+            };
+
+            const handleAddQuest = (e, type) => {
+                e.preventDefault();
+                const data = type === 'concept' ? cQuest : pQuest;
+                if (type === 'concept' && (!data.chapter || !data.time)) return showToast("단원명과 시간을 입력하세요.");
+                if (type === 'problem' && (!data.workbook || !data.qCount)) return showToast("교재명과 문항 수를 입력하세요.");
+                
+                setQuests([{ id: Date.now().toString(), type, ...data, done: false }, ...quests]);
+                if (type === 'concept') setCQuest({ subject: '수학', chapter: '', time: '' });
+                else setPQuest({ subject: '수학', workbook: '', qCount: '' });
+                showToast("의뢰가 등록되었습니다.");
+            };
+
+            const handleCompleteQuest = (qId) => {
+                const q = quests.find(x => x.id === qId);
+                if (!q || q.done) return;
+                setQuests(quests.map(x => x.id === qId ? { ...x, done: true } : x));
+
+                if (q.type === 'concept') {
+                    const mins = parseInt(q.time) || 30;
+                    const expGained = gainRewards(mins * 15, mins * 2); 
+                    showToast(`📖 개념 학습 완료! (+${expGained} EXP)`);
+                } else {
+                    const count = parseInt(q.qCount) || 10;
+                    const dmg = Math.floor(count * getTotalAtk() * 1.5);
+                    gainRewards(count * 5, count * 10); 
+                    dealDamage(dmg);
+                }
+            };
+
+            const toggleTimer = () => {
+                if (!timerState.active) {
+                    setTimerState({ active: true, seconds: 0 });
+                    timerRef.current = setInterval(() => {
+                        setTimerState(prev => ({ ...prev, seconds: prev.seconds + 1 }));
+                    }, 1000);
+                } else {
+                    clearInterval(timerRef.current);
+                    const minutes = Math.floor(timerState.seconds / 60);
+                    if (minutes > 0) {
+                        const timerBonus = player.position === '정시' ? 1.1 : 1.0;
+                        const expGained = gainRewards(Math.floor(minutes * 30 * timerBonus), minutes * 15);
+                        
+                        const newDaily = { ...player.dailyRecords };
+                        newDaily[todayStr] = (newDaily[todayStr] || 0) + minutes;
+                        setPlayer(p => ({ ...p, dailyRecords: newDaily }));
+
+                        if (player.guildId) {
+                            setAllGuilds(prev => prev.map(g => g.id === player.guildId ? { ...g, totalStudyMins: g.totalStudyMins + minutes } : g));
+                        }
+                        showToast(`⏳ 수련 완료! ${minutes}분 누적 (+${expGained} EXP)`);
+                    } else {
+                        showToast("수련 시간이 너무 짧습니다. (최소 1분)");
+                    }
+                    setTimerState({ active: false, seconds: 0 });
+                }
+            };
+
+            const handleCreateGuild = (e) => {
+                e.preventDefault();
+                if (!guildNameInput.trim()) return showToast("학회 이름을 입력해주세요.");
+                const newGuild = { 
+                    id: 'g_' + Date.now(), name: guildNameInput.trim(), members: [player.uid], 
+                    totalStudyMins: player.dailyRecords?.[todayStr] || 0 
+                };
+                setAllGuilds([...allGuilds, newGuild]);
+                setPlayer({ ...player, guildId: newGuild.id });
+                setGuildNameInput('');
+                showToast(`[${newGuild.name}] 학회가 창설되었습니다!`);
+            };
+
+            const handleJoinGuild = (gId) => {
+                const targetGuild = allGuilds.find(g => g.id === gId);
+                if (!targetGuild) return;
+                if (targetGuild.members.length >= 25) return showToast("해당 학회는 정원이 가득 찼습니다.");
+                
+                setAllGuilds(allGuilds.map(g => g.id === gId ? { ...g, members: [...g.members, player.uid] } : g));
+                setPlayer({ ...player, guildId: gId });
+                showToast(`[${targetGuild.name}] 학회에 가입했습니다!`);
+            };
+
+            if (showLoader) {
+                return (
+                    <div className={`fixed inset-0 bg-[#0B0F19] z-[9999] flex items-center justify-center transition-opacity duration-700 ${fadeOutLoader ? 'opacity-0' : 'opacity-100'}`}>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 animate-[glowText_2s_ease-out_forwards] opacity-0" style={{ animationDelay: '0.8s' }}>
+                            <i className="fa-solid fa-shield-halved text-7xl text-sky-400 mb-6 drop-shadow-[0_0_30px_rgba(56,189,248,0.8)]"></i>
+                            <h1 className="text-3xl md:text-4xl font-black text-white tracking-[0.25em] drop-shadow-[0_0_20px_rgba(255,255,255,0.6)] mb-2">EPIC STUDY</h1>
+                            <h2 className="text-xl md:text-2xl font-bold text-sky-300 tracking-[0.5em] drop-shadow-[0_0_15px_rgba(56,189,248,0.8)]">ACADEMY</h2>
+                        </div>
+                        <div className="absolute top-0 left-0 w-1/2 h-full bg-[#1A202C] border-r-[6px] border-amber-500/80 z-20 animate-[openGateLeft_1.5s_cubic-bezier(0.77,0,0.175,1)_forwards] shadow-[15px_0_40px_rgba(0,0,0,0.8)] flex items-center justify-end pr-3" style={{ animationDelay: '0.8s' }}>
+                            <div className="w-5 h-32 bg-gradient-to-b from-amber-300 to-amber-600 rounded-l-full shadow-[0_0_20px_rgba(251,191,36,0.8)]"></div>
+                        </div>
+                        <div className="absolute top-0 right-0 w-1/2 h-full bg-[#1A202C] border-l-[6px] border-amber-500/80 z-20 animate-[openGateRight_1.5s_cubic-bezier(0.77,0,0.175,1)_forwards] shadow-[-15px_0_40px_rgba(0,0,0,0.8)] flex items-center justify-start pl-3" style={{ animationDelay: '0.8s' }}>
+                            <div className="w-5 h-32 bg-gradient-to-b from-amber-300 to-amber-600 rounded-r-full shadow-[0_0_20px_rgba(251,191,36,0.8)]"></div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (!player.isJoined) {
+                return (
+                    <div className="bg-slate-200 min-h-screen flex items-center justify-center p-4">
+                        <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-sky-100">
+                            <div className="flex justify-center mb-6"><i className="fa-solid fa-book-open text-6xl text-sky-400"></i></div>
+                            <h1 className="text-2xl font-black text-center mb-2">왕립 아카데미 입학서</h1>
+                            <p className="text-slate-500 mb-8 text-sm text-center font-bold">당신의 목표와 현재 실력을 입력하세요.</p>
+                            <form onSubmit={handleJoin} className="flex flex-col gap-5">
+                                <div>
+                                    <label className="block text-xs font-black text-slate-500 mb-2">학생증 이름 (닉네임)</label>
+                                    <input type="text" value={player.nickname} onChange={e=>setPlayer({...player, nickname: e.target.value})} maxLength={10} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-black outline-none focus:border-sky-400" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-black text-slate-500 mb-2">목표 전형 (보너스 선택)</label>
+                                    <div className="flex gap-2">
+                                        <button type="button" onClick={() => setPlayer({...player, position: '수시'})} className={`flex-1 py-3 rounded-xl border font-black text-sm transition-colors ${player.position === '수시' ? 'bg-sky-50 border-sky-400 text-sky-600' : 'bg-white border-slate-200 text-slate-400'}`}>수시 (학종)</button>
+                                        <button type="button" onClick={() => setPlayer({...player, position: '정시'})} className={`flex-1 py-3 rounded-xl border font-black text-sm transition-colors ${player.position === '정시' ? 'bg-amber-50 border-amber-400 text-amber-600' : 'bg-white border-slate-200 text-slate-400'}`}>정시 (수능)</button>
+                                    </div>
+                                </div>
+                                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                                    <div className="text-sm font-black text-slate-700 mb-4 text-center">현재 내신/모의고사 등급 (1~9)</div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {SUBJECTS.map(s => (
+                                            <div key={s} className="flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-xl border border-slate-100 shadow-sm">
+                                                <span className="text-slate-600 text-[10px] font-black">{s}</span>
+                                                <input type="number" min="1" max="9" value={player.grades[s]} onChange={e=>{
+                                                    const newGrades = {...player.grades, [s]: e.target.value};
+                                                    setPlayer({...player, grades: newGrades, rank: calcRank(newGrades)});
+                                                }} className="w-10 bg-slate-50 border border-slate-200 rounded p-1 text-center text-sm font-black outline-none focus:border-sky-400" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <button type="submit" className="bg-sky-500 text-white font-black py-4 rounded-xl mt-2 shadow-md active:scale-95 transition-transform text-lg">입학하기</button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            const NAV_TABS = [
+                { id: 'status', icon: 'fa-user', label: '상태창' },
+                { id: 'quests', icon: 'fa-bullseye', label: '퀘스트' },
+                { id: 'shop', icon: 'fa-shop', label: '대장간' },
+                { id: 'timer', icon: 'fa-clock', label: '수련장' },
+                { id: 'summon', icon: 'fa-wand-magic-sparkles', label: '소환소' },
+                { id: 'comm', icon: 'fa-users', label: '커뮤니티' },
+                { id: 'guild', icon: 'fa-shield-halved', label: '학회' },
+                { id: 'rank', icon: 'fa-medal', label: '종합 순위' },
+                { id: 'records', icon: 'fa-calendar-days', label: '학습 기록' },
+                { id: 'settings', icon: 'fa-gear', label: '설정' },
+            ];
+
+            const activeFriends = allUsers.filter(p => friends.includes(p.uid) && p.uid !== player.uid);
+            const myGuild = allGuilds.find(g => g.id === player.guildId);
+
+            return (
+                <div className="bg-slate-200 min-h-screen flex justify-center text-slate-800">
+                    <div className="w-full max-w-md bg-white shadow-2xl relative flex flex-col h-[100dvh] overflow-hidden">
+                        
+                        {toast && (
+                            <div className="absolute top-20 left-1/2 -translate-x-1/2 px-5 py-2.5 rounded-full shadow-lg z-[999] font-bold text-sm bg-slate-800/90 backdrop-blur text-white flex items-center gap-2 animate-[fadeIn_0.3s_ease-out]">
+                                <i className="fa-solid fa-circle-check text-sky-400"></i> {toast}
+                            </div>
+                        )}
+
+                        <header className="bg-white px-5 py-4 border-b border-slate-100 shrink-0 z-50 shadow-sm relative">
+                            <div className="flex justify-between items-center mb-3">
+                                <div className="flex items-center gap-3">
+                                    {player.profilePic ? (
+                                        <img src={player.profilePic} alt="Profile" className="w-12 h-12 rounded-full object-cover border-2 border-sky-100 shadow-sm" />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-sky-100 to-sky-50 border-2 border-white shadow flex items-center justify-center font-black text-sky-500 text-xl">{player.level}</div>
+                                    )}
+                                    <div>
+                                        <div className="flex gap-1 mb-1">
+                                            <span className="text-[10px] font-black text-white bg-sky-500 px-2 py-0.5 rounded-full">{player.rank}급 모험가</span>
+                                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">{player.position}</span>
+                                        </div>
+                                        <div className="font-black text-lg leading-tight">{player.nickname}</div>
+                                    </div>
+                                </div>
+                                <div className="bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-100 flex items-center gap-1">
+                                    <i className="fa-solid fa-crown text-amber-500"></i>
+                                    <span className="font-black text-amber-600">{player.gold.toLocaleString()}</span>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-100">
+                                <span className="text-[10px] font-black text-sky-500 w-6 text-center">EXP</span>
+                                <div className="flex-1 bg-slate-200 h-2 rounded-full overflow-hidden">
+                                    <div className="bg-sky-400 h-full transition-all duration-300" style={{ width: `${Math.min(100, (player.exp / getReqExp(player.level)) * 100)}%` }}></div>
+                                </div>
+                                <span className="text-[9px] font-bold text-slate-400">{player.exp} / {getReqExp(player.level)}</span>
+                            </div>
+                        </header>
+
+                        <main className="flex-1 overflow-y-auto bg-slate-50 relative pb-4">
+                            
+                            {/* --- 1. STATUS TAB --- */}
+                            {activeTab === 'status' && (
+                                <div className="p-5 flex flex-col animate-[fadeIn_0.2s_ease-out]">
+                                    <h2 className="font-black text-lg flex items-center gap-2 mb-2"><i className="fa-solid fa-user text-sky-500"></i> 상태창</h2>
+                                    
+                                    <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 flex flex-col gap-4 mb-5">
+                                        <div className="flex justify-between items-center border-b border-slate-50 pb-4">
+                                            <span className="text-slate-500 font-bold text-sm">종합 전투력 (Total ATK)</span>
+                                            <span className="text-4xl font-black text-sky-500 tracking-tighter">{getTotalAtk().toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-xs">
+                                            <span className="text-slate-500 font-bold">기본 스탯 + 장비 보너스</span>
+                                            <span className="font-black text-slate-700">{player.baseAtk} + {getGearStats().atkBonus}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-xs">
+                                            <span className="text-slate-500 font-bold">경험치 획득 배율</span>
+                                            <span className="font-black text-emerald-500">x {(getEquippedChar().expMult * (1 + getGearStats().expBonus)).toFixed(2)}</span>
+                                        </div>
+                                    </div>
+
+                                    <h3 className="font-black text-sm ml-1 text-slate-700 mb-2">동행 파트너</h3>
+                                    <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex items-center gap-4 mb-5 relative overflow-hidden">
+                                        <div className="absolute -right-4 -bottom-4 w-20 h-20 bg-sky-50 rounded-full blur-2xl z-0"></div>
+                                        <div className={`w-16 h-16 rounded-full flex items-center justify-center font-black text-2xl shadow-sm border-2 border-white z-10 ${getEquippedChar().color} bg-slate-50`}>
+                                            {getEquippedChar().rarity}
+                                        </div>
+                                        <div className="z-10">
+                                            <div className="text-[10px] font-bold text-slate-400 mb-0.5">메인 파트너</div>
+                                            <div className="font-black text-slate-800 text-lg leading-tight">{getEquippedChar().name}</div>
+                                            <div className="text-[11px] font-bold text-sky-500 mt-1">ATK x{getEquippedChar().atkMult} / EXP x{getEquippedChar().expMult}</div>
+                                        </div>
+                                    </div>
+
+                                    <h3 className="font-black text-sm ml-1 text-slate-700 mb-2">장착 중인 장비</h3>
+                                    <div className="grid grid-cols-2 gap-3 mb-2">
+                                        {player.equippedGearIds.length === 0 ? (
+                                            <div className="col-span-2 text-center py-6 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-bold text-slate-400">
+                                                장착된 장비가 없습니다.<br/><span className="text-[10px] font-normal mt-1 block">대장간에서 장비를 구매해 보세요.</span>
+                                            </div>
+                                        ) : (
+                                            player.equippedGearIds.map(id => {
+                                                const item = SHOP_ITEMS.find(i => i.id === id);
+                                                if (!item) return null;
+                                                return (
+                                                    <div key={id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col items-center text-center">
+                                                        <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-2xl mb-2 border border-slate-100">{item.icon}</div>
+                                                        <div className="text-[9px] font-black text-slate-400 mb-0.5">{item.type.toUpperCase()}</div>
+                                                        <div className="font-black text-xs text-slate-700 truncate w-full">{item.name}</div>
+                                                        <div className="text-[10px] font-bold text-sky-500 mt-0.5">{item.desc}</div>
+                                                    </div>
+                                                )
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- 2. QUESTS TAB (Sticky Monster) --- */}
+                            {activeTab === 'quests' && (
+                                <div className="flex flex-col relative min-h-full animate-[fadeIn_0.2s_ease-out]">
+                                    <div className="sticky top-0 z-20 bg-slate-50 pt-4 pb-2 px-4">
+                                        <div className="bg-slate-800 p-5 text-center rounded-[2rem] shadow-lg relative overflow-hidden">
+                                            <div className="inline-block bg-rose-500 text-white text-[10px] font-black px-3 py-1 rounded-full mb-2">일일 토벌 Lv.{monster.level}</div>
+                                            <h3 className="text-xl font-black text-white mb-3">강해진 몬스터</h3>
+                                            <div className="max-w-[250px] mx-auto bg-slate-900 p-2.5 rounded-xl border border-slate-700 relative">
+                                                <div className="flex justify-between text-[10px] text-slate-300 font-bold mb-1.5">
+                                                    <span>HP</span><span className="font-mono">{monster.hp} / {monster.maxHp}</span>
+                                                </div>
+                                                <div className="w-full bg-slate-700 h-2.5 rounded-full overflow-hidden">
+                                                    <div className="bg-rose-500 h-full transition-all duration-300 shadow-[0_0_10px_rgba(244,63,94,0.8)]" style={{ width: `${Math.max(0, (monster.hp / monster.maxHp) * 100)}%` }}></div>
+                                                </div>
+                                                {damageText && (
+                                                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-rose-400 font-black text-3xl drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] animate-[slideUp_0.5s_ease-out]">-{damageText}</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="px-4 pb-4">
+                                        <div className="flex bg-slate-200 p-1.5 rounded-2xl mb-4 mt-2">
+                                            <button onClick={() => setQuestTab('concept')} className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${questTab === 'concept' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400'}`}>📖 개념 (EXP)</button>
+                                            <button onClick={() => setQuestTab('problem')} className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${questTab === 'problem' ? 'bg-white text-rose-500 shadow-sm' : 'text-slate-400'}`}>✍️ 문제 (DMG)</button>
+                                        </div>
+                                        <form onSubmit={(e) => handleAddQuest(e, questTab)} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col gap-3 mb-6">
+                                            <div className="flex gap-2">
+                                                <select value={questTab==='concept'?cQuest.subject:pQuest.subject} onChange={e => questTab==='concept'?setCQuest({...cQuest, subject:e.target.value}):setPQuest({...pQuest, subject:e.target.value})} className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-black outline-none w-[90px]">
+                                                    {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                                                </select>
+                                                {questTab === 'concept' ? (
+                                                    <input type="text" placeholder="단원명 (예: 1단원)" value={cQuest.chapter} onChange={e => setCQuest({...cQuest, chapter: e.target.value})} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-black outline-none" />
+                                                ) : (
+                                                    <input type="text" placeholder="교재명 (예: 쎈 수학)" value={pQuest.workbook} onChange={e => setPQuest({...pQuest, workbook: e.target.value})} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-black outline-none" />
+                                                )}
+                                            </div>
+                                            {questTab === 'concept' ? (
+                                                <input type="number" placeholder="예상 소요 시간 (분)" value={cQuest.time} onChange={e => setCQuest({...cQuest, time: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-black outline-none" />
+                                            ) : (
+                                                <input type="number" placeholder="푼 문항 수 (데미지 비례)" value={pQuest.qCount} onChange={e => setPQuest({...pQuest, qCount: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-black outline-none" />
+                                            )}
+                                            <button type="submit" className={`p-3.5 rounded-xl font-black text-sm text-white shadow-sm mt-1 active:scale-95 transition-transform flex items-center justify-center gap-2 ${questTab === 'concept' ? 'bg-sky-500' : 'bg-rose-500'}`}><i className="fa-solid fa-circle-plus"></i> 의뢰 등록</button>
+                                        </form>
+                                        <div className="space-y-3">
+                                            <h3 className="font-black text-sm ml-1">진행 중인 의뢰</h3>
+                                            {quests.filter(q => !q.done).length === 0 ? <div className="text-center py-6 text-slate-400 text-xs font-bold bg-white rounded-2xl border border-slate-100">등록된 의뢰가 없습니다.</div> : quests.filter(q => !q.done).map(q => (
+                                                <div key={q.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center">
+                                                    <div>
+                                                        <div className="flex gap-1.5 mb-1.5"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${q.type==='concept'?'bg-sky-50 text-sky-600':'bg-rose-50 text-rose-500'}`}>[{q.subject}] {q.type==='concept'?'개념':'문제'}</span></div>
+                                                        <div className="font-bold text-sm">{q.type==='concept' ? q.chapter : q.workbook}</div>
+                                                        <div className="text-[10px] font-bold text-slate-400 mt-0.5">{q.type==='concept' ? `${q.time}분 소요 예정` : `${q.qCount}문항 돌파`}</div>
+                                                    </div>
+                                                    <button onClick={() => handleCompleteQuest(q.id)} className={`px-4 py-2.5 rounded-xl font-black text-xs text-white shadow-sm active:scale-95 transition-transform ${q.type==='concept' ? 'bg-sky-500' : 'bg-rose-500'}`}>완료</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- 3. SHOP TAB --- */}
+                            {activeTab === 'shop' && (
+                                <div className="p-5 animate-[fadeIn_0.2s_ease-out]">
+                                    <h2 className="font-black text-lg flex items-center gap-2 mb-4"><i className="fa-solid fa-shop text-sky-500"></i> 아카데미 대장간</h2>
+                                    <div className="grid grid-cols-1 gap-3">
+                                        {SHOP_ITEMS.map(item => {
+                                            const isEquipped = player.equippedGearIds.includes(item.id);
+                                            const isOwned = player.inventoryGear.includes(item.id);
+                                            return (
+                                                <div key={item.id} className={`bg-white rounded-2xl p-4 shadow-sm border flex items-center gap-4 ${isEquipped ? 'border-sky-400 ring-1 ring-sky-100' : 'border-slate-100'}`}>
+                                                    <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-2xl border border-slate-100">{item.icon}</div>
+                                                    <div className="flex-1">
+                                                        <div className="text-[9px] font-black text-slate-400 mb-0.5">{item.type.toUpperCase()}</div>
+                                                        <div className="font-black text-sm mb-0.5">{item.name}</div>
+                                                        <div className="text-[10px] font-bold text-sky-500">{item.desc}</div>
+                                                    </div>
+                                                    <div>
+                                                        {!isOwned ? (
+                                                            <button onClick={() => {
+                                                                if(player.gold < item.price) return showToast("골드 부족!");
+                                                                setPlayer({...player, gold: player.gold - item.price, inventoryGear: [...player.inventoryGear, item.id]});
+                                                            }} className="bg-amber-50 text-amber-600 px-3 py-1.5 rounded-xl text-[10px] font-black border border-amber-200 flex items-center gap-1"><i className="fa-solid fa-crown text-[10px]"></i>{item.price}</button>
+                                                        ) : isEquipped ? (
+                                                            <button onClick={() => setPlayer({...player, equippedGearIds: player.equippedGearIds.filter(id=>id!==item.id)})} className="bg-slate-100 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black">해제</button>
+                                                        ) : (
+                                                            <button onClick={() => {
+                                                                const newEq = player.equippedGearIds.filter(id => SHOP_ITEMS.find(i=>i.id===id)?.type !== item.type);
+                                                                setPlayer({...player, equippedGearIds: [...newEq, item.id]});
+                                                            }} className="bg-sky-50 text-sky-600 px-3 py-1.5 rounded-xl text-[10px] font-black border border-sky-200">장착</button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- 4. TIMER TAB --- */}
+                            {activeTab === 'timer' && (
+                                <div className="flex flex-col h-full items-center justify-center p-5 animate-[fadeIn_0.2s_ease-out]">
+                                    <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-sm border border-slate-100 text-center">
+                                        <h2 className="font-black text-xl mb-1">결계 수련장</h2>
+                                        <p className="text-[10px] font-bold text-slate-400 mb-8">수련 종료 시 개인 및 학회 누적 시간에 합산됩니다.</p>
+                                        <div className="text-5xl font-black font-mono mb-8 tracking-tighter text-slate-800">
+                                            {Math.floor(timerState.seconds / 3600).toString().padStart(2, '0')}:
+                                            {Math.floor((timerState.seconds % 3600) / 60).toString().padStart(2, '0')}:
+                                            {(timerState.seconds % 60).toString().padStart(2, '0')}
+                                        </div>
+                                        <button onClick={toggleTimer} className={`w-full py-4 rounded-2xl font-black flex justify-center items-center gap-2 active:scale-95 transition-all ${!timerState.active ? 'bg-slate-800 text-white shadow-md' : 'bg-rose-50 text-rose-500 border border-rose-200'}`}>
+                                            {!timerState.active ? <><i className="fa-solid fa-play"></i> 훈련 시작</> : <><i className="fa-solid fa-square"></i> 정산 및 종료</>}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- 5. SUMMON TAB --- */}
+                            {activeTab === 'summon' && (
+                                <div className="p-5 animate-[fadeIn_0.2s_ease-out]">
+                                    <div className="bg-white rounded-[2rem] p-6 text-center shadow-sm border border-amber-100 mb-6">
+                                        <i className="fa-solid fa-wand-magic-sparkles text-4xl text-amber-400 mx-auto mb-3"></i>
+                                        <h2 className="font-black text-2xl mb-1">왕립 소환소</h2>
+                                        <p className="text-[10px] text-slate-500 font-bold mb-6">골드를 사용하여 강력한 파트너 영입</p>
+                                        <div className="flex gap-3">
+                                            <button onClick={() => {
+                                                if (player.gold < 500) return showToast("골드가 부족합니다.");
+                                                const pulls = [CHARACTERS[Math.floor(Math.random()*CHARACTERS.length)]];
+                                                setPlayer({...player, gold: player.gold - 500, inventoryChar: [...new Set([...player.inventoryChar, ...pulls.map(c=>c.id)])]});
+                                                setGachaModal(pulls);
+                                            }} className="flex-1 bg-amber-50 text-amber-600 py-3 rounded-xl font-black text-sm border border-amber-200">1회 (500G)</button>
+                                            <button onClick={() => {
+                                                if (player.gold < 5000) return showToast("골드가 부족합니다.");
+                                                const pulls = Array(10).fill().map(()=>CHARACTERS[Math.floor(Math.random()*CHARACTERS.length)]);
+                                                setPlayer({...player, gold: player.gold - 5000, inventoryChar: [...new Set([...player.inventoryChar, ...pulls.map(c=>c.id)])]});
+                                                setGachaModal(pulls);
+                                            }} className="flex-1 bg-slate-800 text-white py-3 rounded-xl font-black text-sm shadow-md">10회 (5000G)</button>
+                                        </div>
+                                    </div>
+                                    <h3 className="font-black text-sm ml-1 mb-3">명부 (소유 중인 동료)</h3>
+                                    <div className="grid grid-cols-2 gap-3 pb-6">
+                                        {CHARACTERS.filter(c => player.inventoryChar.includes(c.id)).map(c => (
+                                            <div key={c.id} onClick={() => setPlayer({...player, equippedCharId: c.id})} className={`bg-white rounded-2xl p-4 shadow-sm text-center cursor-pointer border ${player.equippedCharId === c.id ? 'border-sky-500 ring-2 ring-sky-100' : 'border-slate-100'}`}>
+                                                {player.equippedCharId === c.id && <div className="absolute top-2 right-2"><i className="fa-solid fa-circle-check text-sky-500"></i></div>}
+                                                <div className="w-12 h-12 mx-auto rounded-full bg-slate-50 flex items-center justify-center font-black text-lg mb-2"><span className={c.color}>{c.rarity}</span></div>
+                                                <div className="text-xs font-black truncate">{c.name}</div>
+                                                <div className="text-[9px] font-bold text-slate-400">ATK x{c.atkMult} / EXP x{c.expMult}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- 6. COMMUNITY TAB (NO DUMMIES) --- */}
+                            {activeTab === 'comm' && (
+                                <div className="p-5 animate-[fadeIn_0.2s_ease-out]">
+                                    <div className="bg-sky-50 p-6 rounded-3xl border border-sky-100 text-center mb-6">
+                                        <div className="text-[10px] font-bold text-sky-600 mb-1">나의 통신 코드</div>
+                                        <div className="text-3xl font-black tracking-widest select-all">{player.friendCode}</div>
+                                        <p className="text-[10px] text-slate-400 mt-2 font-bold">친구에게 코드를 알려주어 등록하세요.</p>
+                                    </div>
+                                    <form onSubmit={(e)=>{
+                                        e.preventDefault();
+                                        const code = friendInput.trim().toUpperCase();
+                                        if (code === player.friendCode) return showToast("자신은 추가할 수 없습니다.");
+                                        const f = allUsers.find(p => p.friendCode === code);
+                                        if(f && !friends.includes(f.uid)) {
+                                            setFriends([...friends, f.uid]);
+                                            showToast(`${f.nickname} 등록 완료!`);
+                                        } else showToast("올바르지 않거나 이미 등록된 코드입니다.");
+                                        setFriendInput('');
+                                    }} className="flex gap-2 mb-6">
+                                        <input type="text" placeholder="코드 입력 (6자리)" value={friendInput} onChange={e=>setFriendInput(e.target.value)} maxLength={6} className="flex-1 bg-white border border-slate-200 rounded-xl p-3 text-sm font-black outline-none" />
+                                        <button type="submit" className="bg-slate-800 text-white px-5 rounded-xl font-black text-sm">추가</button>
+                                    </form>
+
+                                    <h3 className="font-black text-sm ml-1 mb-2">동료 목록 (PvP 결투)</h3>
+                                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50 mb-6">
+                                        {activeFriends.length === 0 ? <div className="p-6 text-center text-xs text-slate-400 font-bold">현재 등록된 동료가 없습니다.</div> : activeFriends.map(f => (
+                                            <div key={f.uid} className="p-4 flex items-center justify-between">
+                                                <div>
+                                                    <div className="font-black text-sm mb-0.5">{f.nickname}</div>
+                                                    <div className="text-[9px] font-bold text-slate-400">Lv.{f.level} / {f.rank}급 모험가</div>
+                                                </div>
+                                                <button onClick={() => setDuelModal({ friend: f, isWin: player.level >= f.level })} className="bg-rose-50 text-rose-500 border border-rose-100 px-3 py-1.5 rounded-xl font-black text-[10px] flex items-center gap-1"><i className="fa-solid fa-khanda"></i> 결투</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- 7. GUILD TAB (CREATE & JOIN) --- */}
+                            {activeTab === 'guild' && (
+                                <div className="p-5 animate-[fadeIn_0.2s_ease-out]">
+                                    <h2 className="font-black text-lg flex items-center gap-2 mb-4"><i className="fa-solid fa-shield-halved text-sky-500"></i> 아카데미 학회</h2>
+                                    {!player.guildId ? (
+                                        <div className="flex flex-col gap-6">
+                                            <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm text-center">
+                                                <p className="text-xs font-bold text-slate-500 mb-4">새로운 학회를 창설하세요. (최대 정원 25명)</p>
+                                                <form onSubmit={handleCreateGuild} className="flex flex-col gap-3">
+                                                    <input type="text" placeholder="학회 이름 입력" value={guildNameInput} onChange={e=>setGuildNameInput(e.target.value)} maxLength={12} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-black outline-none" />
+                                                    <button type="submit" className="w-full bg-slate-800 text-white py-3 rounded-xl font-black text-sm">창설하기</button>
+                                                </form>
+                                            </div>
+
+                                            <div>
+                                                <h3 className="font-black text-sm ml-1 mb-2">개설된 학회 목록</h3>
+                                                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
+                                                    {allGuilds.length === 0 ? (
+                                                        <div className="p-6 text-center text-xs text-slate-400 font-bold">현재 개설된 학회가 없습니다.</div>
+                                                    ) : (
+                                                        allGuilds.map(g => (
+                                                            <div key={g.id} className="p-4 flex items-center justify-between">
+                                                                <div>
+                                                                    <div className="font-black text-sm mb-0.5">{g.name}</div>
+                                                                    <div className="text-[10px] font-bold text-slate-500">인원: {g.members.length}/25</div>
+                                                                </div>
+                                                                <button onClick={() => handleJoinGuild(g.id)} className="bg-sky-50 text-sky-600 px-4 py-2 rounded-xl font-black text-xs border border-sky-100">가입</button>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                                            <div className="text-center mb-6">
+                                                <i className="fa-solid fa-shield-halved text-5xl text-sky-400 mx-auto mb-2"></i>
+                                                <h3 className="text-2xl font-black text-slate-800">{myGuild?.name || '알 수 없는 학회'}</h3>
+                                                <div className="text-[10px] font-bold text-slate-400 mt-1">정원: {myGuild?.members?.length || 1}/25명 | 학회 총 수련: {(myGuild?.totalStudyMins || 0).toLocaleString()}분</div>
+                                                <button onClick={()=>setPlayer({...player, guildId: null})} className="mt-4 text-[10px] font-bold text-rose-500 bg-rose-50 px-3 py-1 rounded-full border border-rose-100">탈퇴하기</button>
+                                            </div>
+                                            <h4 className="font-black text-xs text-slate-600 mb-3 border-b border-slate-100 pb-2">소속 학회원 (오늘 수련 시간)</h4>
+                                            <div className="divide-y divide-slate-50">
+                                                {allUsers.filter(u => myGuild?.members?.includes(u.uid)).map(u => (
+                                                    <div key={u.uid} className="py-3 flex justify-between items-center">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-black">{u.level}</div>
+                                                            <div className="font-bold text-sm text-slate-700">{u.nickname} {u.uid === player.uid && <span className="text-[8px] bg-slate-800 text-white px-1.5 rounded-full ml-1">ME</span>}</div>
+                                                        </div>
+                                                        <div className="text-xs font-black text-sky-500 bg-sky-50 px-2 py-1 rounded-lg">{u.dailyRecords?.[todayStr] || 0}분</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* --- 8. RANKING TAB (NO DUMMIES) --- */}
+                            {activeTab === 'rank' && (
+                                <div className="p-5 animate-[fadeIn_0.2s_ease-out]">
+                                    <h2 className="font-black text-lg flex items-center gap-2 mb-2"><i className="fa-solid fa-medal text-amber-500"></i> 아카데미 종합 순위</h2>
+                                    <div className="flex bg-slate-200 p-1.5 rounded-2xl mb-4 mt-2">
+                                        <button onClick={() => setRankTab('user')} className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${rankTab === 'user' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400'}`}>모험가 순위</button>
+                                        <button onClick={() => setRankTab('guild')} className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${rankTab === 'guild' ? 'bg-white text-amber-500 shadow-sm' : 'text-slate-400'}`}>학회 순위</button>
+                                    </div>
+                                    
+                                    <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y divide-slate-50 overflow-hidden">
+                                        {rankTab === 'guild' ? (
+                                            allGuilds.length === 0 ? (
+                                                <div className="p-8 text-center text-xs font-bold text-slate-400">등록된 학회가 없습니다.</div>
+                                            ) : (
+                                                [...allGuilds].sort((a,b) => b.totalStudyMins - a.totalStudyMins).map((g, i) => (
+                                                    <div key={g.id} className={`p-4 flex items-center justify-between ${player.guildId === g.id ? 'bg-sky-50/50' : ''}`}>
+                                                        <div className="flex items-center gap-4">
+                                                            <div className={`w-5 text-center font-black ${i===0?'text-amber-500':i===1?'text-slate-400':i===2?'text-orange-400':'text-slate-300'}`}>{i+1}</div>
+                                                            <div>
+                                                                <div className="font-black text-sm">{g.name}</div>
+                                                                <div className="text-[10px] font-bold text-slate-500">인원: {g.members.length}/25</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-xs font-black text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">누적 {g.totalStudyMins.toLocaleString()}분</div>
+                                                    </div>
+                                                ))
+                                            )
+                                        ) : (
+                                            [...allUsers].sort((a,b)=>(b.level - a.level) || (b.exp - a.exp)).map((p, i) => (
+                                                <div key={p.uid} className={`p-4 flex items-center justify-between ${p.uid === player.uid ? 'bg-sky-50/50' : ''}`}>
+                                                    <div className="flex items-center gap-4">
+                                                        <div className={`w-5 text-center font-black ${i===0?'text-amber-500':i===1?'text-slate-400':i===2?'text-orange-400':'text-slate-300'}`}>{i+1}</div>
+                                                        <div>
+                                                            <div className="font-black text-sm flex items-center gap-1.5">{p.nickname} {p.uid === player.uid && <span className="text-[9px] bg-slate-800 text-white px-1.5 rounded-full">ME</span>}</div>
+                                                            <div className="text-[10px] font-bold text-slate-500">Lv.{p.level} / {p.rank}급 모험가 / {p.position}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-xs font-black text-sky-600 bg-sky-50 px-2 py-1 rounded-lg">{p.exp} EXP</div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- 9. STUDY RECORDS TAB --- */}
+                            {activeTab === 'records' && (
+                                <div className="p-5 animate-[fadeIn_0.2s_ease-out]">
+                                    <h2 className="font-black text-lg flex items-center gap-2 mb-4"><i className="fa-solid fa-calendar-days text-sky-500"></i> 나의 학습 기록</h2>
+                                    <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 mb-6">
+                                        <h3 className="font-black text-sm mb-4 border-b border-slate-100 pb-2">일자별 수련 누적 (분)</h3>
+                                        <div className="space-y-2">
+                                            {Object.keys(player.dailyRecords || {}).length === 0 ? <div className="text-center text-xs text-slate-400 font-bold py-4">수련장 기록이 없습니다.</div> : 
+                                                Object.entries(player.dailyRecords).sort((a,b)=>b[0].localeCompare(a[0])).map(([date, mins]) => (
+                                                <div key={date} className="flex justify-between items-center bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100">
+                                                    <div className="font-bold text-sm text-slate-700">{date}</div>
+                                                    <div className="font-black text-sm text-sky-500">{mins}분</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* --- 10. SETTINGS TAB --- */}
+                            {activeTab === 'settings' && (
+                                <div className="p-5 animate-[fadeIn_0.2s_ease-out]">
+                                    <h2 className="font-black text-lg flex items-center gap-2 mb-4"><i className="fa-solid fa-gear text-sky-500"></i> 설정 (내 정보)</h2>
+                                    <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 flex flex-col items-center mb-4">
+                                        <div className="relative mb-3 group cursor-pointer" onClick={() => document.getElementById('avatar-upload').click()}>
+                                            {player.profilePic ? (
+                                                <img src={player.profilePic} alt="Profile" className="w-20 h-20 rounded-full object-cover border-4 border-slate-50 shadow-sm" />
+                                            ) : (
+                                                <div className="w-20 h-20 rounded-full bg-slate-100 border-4 border-slate-50 flex items-center justify-center text-slate-400 shadow-sm"><i className="fa-solid fa-user text-3xl"></i></div>
+                                            )}
+                                            <div className="absolute bottom-0 right-0 bg-slate-800 text-white p-1.5 rounded-full shadow-md"><i className="fa-solid fa-image text-[10px] w-3 h-3 text-center leading-3"></i></div>
+                                        </div>
+                                        <input type="file" id="avatar-upload" accept="image/*" className="hidden" onChange={(e)=>{
+                                            const file = e.target.files[0];
+                                            if(file) {
+                                                const reader = new FileReader();
+                                                reader.onload = ev => { setPlayer({...player, profilePic: ev.target.result}); showToast("프로필 사진 갱신!"); };
+                                                reader.readAsDataURL(file);
+                                            }
+                                        }} />
+                                        <div className="text-sm font-black text-slate-700">프로필 사진 변경</div>
+                                    </div>
+
+                                    <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 flex flex-col gap-5">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 mb-1.5 block">닉네임</label>
+                                            <input type="text" value={player.nickname} onChange={e=>setPlayer({...player, nickname: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-black outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 mb-1.5 block">전형 (수시/정시)</label>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => setPlayer({...player, position: '수시'})} className={`flex-1 py-3 rounded-xl border font-bold text-sm ${player.position === '수시' ? 'bg-sky-50 border-sky-300 text-sky-600' : 'bg-white border-slate-200 text-slate-400'}`}>수시</button>
+                                                <button onClick={() => setPlayer({...player, position: '정시'})} className={`flex-1 py-3 rounded-xl border font-bold text-sm ${player.position === '정시' ? 'bg-amber-50 border-amber-300 text-amber-600' : 'bg-white border-slate-200 text-slate-400'}`}>정시</button>
+                                            </div>
+                                        </div>
+                                        <div className="border-t border-slate-100 pt-5">
+                                            <label className="text-xs font-bold text-slate-500 mb-3 block">내신 등급 갱신</label>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {SUBJECTS.map(s => (
+                                                    <div key={s} className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100">
+                                                        <span className="text-[10px] font-bold text-slate-600">{s}</span>
+                                                        <input type="number" min="1" max="9" value={player.grades[s]} onChange={e=>{
+                                                            const newGrades = {...player.grades, [s]: e.target.value};
+                                                            setPlayer({...player, grades: newGrades, rank: calcRank(newGrades)});
+                                                        }} className="w-10 text-center bg-white border border-slate-200 rounded p-1 text-sm font-black outline-none" />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </main>
+
+                        {/* --- 5x2 (10 buttons) Bottom Navigation Bar --- */}
+                        <nav className="bg-white border-t border-slate-100 grid grid-cols-5 grid-rows-2 gap-1 p-1.5 pb-safe shrink-0 z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.03)]">
+                            {NAV_TABS.map(t => (
+                                <button key={t.id} onClick={() => setActiveTab(t.id)} className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all ${activeTab === t.id ? 'bg-slate-100 text-sky-500' : 'text-slate-400 hover:bg-slate-50'}`}>
+                                    <i className={`fa-solid ${t.icon} text-sm mb-1`}></i>
+                                    <span className={`text-[8px] tracking-tight ${activeTab === t.id ? 'font-black' : 'font-bold'}`}>{t.label}</span>
+                                </button>
+                            ))}
+                        </nav>
+
+                        {/* --- Modals --- */}
+                        {gachaModal && (
+                            <div className="absolute inset-0 bg-slate-900/80 z-[1000] flex items-center justify-center p-5" onClick={() => setGachaModal(null)}>
+                                <div className="bg-white rounded-[2rem] p-6 w-full max-w-sm text-center animate-[slideUp_0.3s_ease-out]" onClick={e=>e.stopPropagation()}>
+                                    <h2 className="font-black text-xl mb-4">소환 결과</h2>
+                                    <div className="flex flex-wrap justify-center gap-2 mb-6">
+                                        {gachaModal.map((c, i) => (
+                                            <div key={i} className="flex flex-col items-center bg-slate-50 border border-slate-100 p-2 rounded-xl w-[70px]">
+                                                <div className={`w-10 h-10 rounded-full bg-white flex items-center justify-center font-black mb-1 shadow-sm border border-slate-100 ${c.color}`}>{c.rarity}</div>
+                                                <div className="text-[8px] font-black truncate w-full">{c.name}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <button onClick={()=>setGachaModal(null)} className="w-full bg-slate-800 text-white font-black py-4 rounded-xl">확인</button>
+                                </div>
+                            </div>
+                        )}
+                        {duelModal && (
+                            <div className="absolute inset-0 bg-slate-900/80 z-[1000] flex items-center justify-center p-5" onClick={() => setDuelModal(null)}>
+                                <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm text-center animate-[slideUp_0.3s_ease-out]" onClick={e=>e.stopPropagation()}>
+                                    <i className={`fa-solid fa-khanda text-5xl mx-auto mb-4 ${duelModal.isWin ? 'text-sky-500' : 'text-rose-500'}`}></i>
+                                    <h2 className="font-black text-2xl mb-6">{duelModal.isWin ? '결투 승리!' : '패배...'}</h2>
+                                    <button onClick={()=>setDuelModal(null)} className="w-full bg-slate-800 text-white font-black py-4 rounded-xl">확인</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<EpicStudyAcademy />);
+    </script>
+</body>
+</html>
